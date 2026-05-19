@@ -1,0 +1,1 @@
+Vero Core Contracts is a Soroban smart contract that brings on-chain GitHub PR verification to Stellar. Trusted guardians vote on registered pull requests; once three votes are cast the task is marked complete, creating an immutable, tamper-proof audit trail.

@@ -1,2 +1,1 @@
-pub fn emit_verified_event() {}
-// Code cleanup
+// Event emission helpers reserved for future use.
