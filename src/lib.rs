@@ -2,6 +2,7 @@
 
 mod circuit_breaker;
 mod drips;
+mod gas;
 mod guardian;
 mod reentrancy;
 mod reputation;
@@ -16,6 +17,7 @@ use types::{ContractError, DataKey, RewardStream};
 pub use guardian::{add_guardian, is_guardian};
 pub use task::{get_task, register_task};
 pub use drips::{get_reward_stream, start_drips_stream};
+pub use types::Operation;
 
 const DEFAULT_WEIGHT_THRESHOLD: u64 = 300;
 
@@ -350,6 +352,25 @@ impl VeroContract {
 
     pub fn reset_circuit_breaker(env: Env, admin: Address) {
         circuit_breaker::reset(&env, admin);
+    }
+
+    // ─── Gas cost estimation ───────────────────────────────────────────
+
+    /// Returns the estimated instruction-unit cost for a given [`Operation`].
+    ///
+    /// This is a pure view function — it performs no storage reads or writes,
+    /// no authentication, and no cross-contract calls. Guardians and tooling
+    /// can call this before submitting a transaction to set an appropriate
+    /// resource fee and avoid "out of gas" failures.
+    ///
+    /// # Arguments
+    /// * `op` — The [`Operation`] variant whose cost estimate is requested.
+    ///
+    /// # Returns
+    /// A `u64` representing the conservative upper-bound instruction-unit cost,
+    /// calibrated against Soroban Protocol 21 metering constants.
+    pub fn get_estimated_cost(_env: Env, op: types::Operation) -> u64 {
+        gas::get_estimated_cost(op)
     }
 
     // ─── Contract upgrade ──────────────────────────────────────────
