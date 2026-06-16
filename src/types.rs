@@ -38,10 +38,8 @@ pub enum DataKey {
     LockThreshold,
     LockedBalance(Address),
     Lock,              // re-entrancy mutex
-    WeightThreshold,
-    Reputation(Address),   // u64 reputation score for a guardian
-    FailureCount,          // circuit breaker failure counter
-    Paused,                // circuit breaker pause flag
+    FailureCount,      // circuit breaker failure counter
+    Paused,            // circuit breaker pause flag
 }
 
 #[contracterror]
@@ -49,20 +47,19 @@ pub enum DataKey {
 pub enum ContractError {
     NotAuthorized = 1,
     DuplicateVote = 2,
-    NoReputationScore = 8,
-    ZeroWeightVote = 9,
-    WeightOverflow = 10,
     TaskNotVerified = 3,
     StreamAlreadyActive = 4,
     DripsCallFailed = 5,
     AlreadyInitialized = 6,
     NotInitialized = 7,
-    InsufficientLockedBalance = 8,
-    StillGuardian = 9,
-    NotGuardian = 10,
-    Locked = 6,
-    NoReputationScore = 7,
-    ZeroWeightVote = 8,
-    WeightOverflow = 9,
-    ContractPaused = 10,
+    NoReputationScore = 8,
+    ZeroWeightVote = 9,
+    WeightOverflow = 10,
+    InsufficientLockedBalance = 11,
+    StillGuardian = 12,
+    NotGuardian = 13,
+    Locked = 14,
+    ContractPaused = 15,
+    BatchTooLarge = 16,
+    EscrowUnavailable = 17,
 }

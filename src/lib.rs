@@ -11,11 +11,11 @@ mod vault;
 mod reentrancy;
 pub mod events;
 
-use soroban_sdk::{contract, contractimpl, Address, Env};
+use soroban_sdk::{contract, contractimpl, Address, Env, Vec};
 use types::{ContractError, DataKey, RewardStream};
 
 pub use guardian::{add_guardian, is_guardian};
-pub use task::{get_task, register_task};
+pub use task::{get_task, register_tasks};
 pub use drips::{get_reward_stream, start_drips_stream};
 
 /// Default weight threshold: a task requires at least 300 cumulative
@@ -235,13 +235,23 @@ impl VeroContract {
 
     // ─── Task lifecycle ────────────────────────────────────────────
 
+    pub fn register_tasks(
+        env: Env,
+        admin: Address,
+        task_ids: Vec<u64>,
+    ) -> Result<(), ContractError> {
+        circuit_breaker::require_not_paused(&env)?;
+        task::register_tasks(&env, admin, task_ids)
+    }
+
     pub fn register_task(
         env: Env,
         admin: Address,
         task_id: u64,
     ) -> Result<(), ContractError> {
         circuit_breaker::require_not_paused(&env)?;
-        task::register_task(&env, admin, task_id)
+        let task_ids = Vec::from_array(env, [task_id]);
+        task::register_tasks(&env, admin, task_ids)
     }
 
     /// Casts a weighted vote on a task. The guardian's reputation score
@@ -259,8 +269,6 @@ impl VeroContract {
     pub fn vote(env: Env, guardian: Address, task_id: u64) -> Result<(), ContractError> {
         circuit_breaker::require_not_paused(&env)?;
         guardian.require_auth();
-        reentrancy::lock(&env)?;
-
         reentrancy::lock(&env)?;
 
         // 1. Verify guardian status
