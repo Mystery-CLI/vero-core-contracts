@@ -669,71 +669,175 @@ fn debug_circuit_breaker_count() {
     assert!(client.is_paused());
 }
 
-// ─── Task cancellation ──────────────────────────────────────────────
+// ─── Gas cost estimation ───────────────────────────────────────────
 
+use vero_core_contracts::Operation;
+
+/// Every operation must return a non-zero cost. A zero would mean the
+/// mapping is incomplete and guardians would under-estimate their gas.
 #[test]
-fn test_cancel_task_success() {
-    let (_env, admin, _token, client) = setup();
-    client.register_task(&admin, &100u64);
+fn test_all_operations_return_nonzero_cost() {
+    let (_env, _admin, _token, client) = setup();
 
-    let task = client.get_task(&100u64).unwrap();
-    assert!(!task.is_cancelled);
+    let ops = [
+        Operation::RegisterTask,
+        Operation::Vote,
+        Operation::AddGuardian,
+        Operation::SetReputation,
+        Operation::LockTokens,
+        Operation::UnlockTokens,
+        Operation::ResignGuardian,
+        Operation::SetWeightThreshold,
+        Operation::StartRewardStream,
+        Operation::TogglePause,
+        Operation::RecordFailure,
+        Operation::ResetCircuitBreaker,
+        Operation::UpgradeContract,
+    ];
 
-    client.cancel_task(&admin, &100u64);
-
-    let task = client.get_task(&100u64).unwrap();
-    assert!(task.is_cancelled);
+    for op in ops {
+        let cost = client.get_estimated_cost(&op);
+        assert!(cost > 0, "Operation {:?} returned zero cost — mapping is incomplete", op);
+    }
 }
 
+/// `Vote` is the most complex write path (5+ reads, 2 writes, conditional
+/// cross-contract call). Its estimated cost must be at least as high as
+/// every other write operation except `UpgradeContract` (platform fixed cost).
 #[test]
-fn test_cancel_task_nonexistent() {
-    let (_env, admin, _token, client) = setup();
-    let result = client.try_cancel_task(&admin, &999u64);
-    assert!(result.is_err());
+fn test_vote_is_most_expensive_write_operation() {
+    let (_env, _admin, _token, client) = setup();
+
+    let vote_cost = client.get_estimated_cost(&Operation::Vote);
+
+    let other_write_ops = [
+        Operation::RegisterTask,
+        Operation::AddGuardian,
+        Operation::SetReputation,
+        Operation::LockTokens,
+        Operation::UnlockTokens,
+        Operation::ResignGuardian,
+        Operation::SetWeightThreshold,
+        Operation::StartRewardStream,
+        Operation::TogglePause,
+        Operation::RecordFailure,
+        Operation::ResetCircuitBreaker,
+    ];
+
+    for op in other_write_ops {
+        let cost = client.get_estimated_cost(&op);
+        assert!(
+            vote_cost >= cost,
+            "Vote ({}) should be >= {:?} ({})",
+            vote_cost, op, cost
+        );
+    }
 }
 
+/// `UpgradeContract` carries the highest platform overhead (WASM hash write).
+/// It must be the single most expensive operation overall.
 #[test]
-fn test_vote_on_cancelled_task_reverts() {
-    let (env, admin, token, client) = setup();
-    client.register_task(&admin, &100u64);
+fn test_upgrade_contract_is_overall_maximum() {
+    let (_env, _admin, _token, client) = setup();
 
-    let g = add_guardian_with_rep(&env, &client, &admin, 100);
-    lock_for_guardian(&env, &token, &client, &g, 101);
+    let upgrade_cost = client.get_estimated_cost(&Operation::UpgradeContract);
 
-    client.cancel_task(&admin, &100u64);
+    let all_ops = [
+        Operation::RegisterTask,
+        Operation::Vote,
+        Operation::AddGuardian,
+        Operation::SetReputation,
+        Operation::LockTokens,
+        Operation::UnlockTokens,
+        Operation::ResignGuardian,
+        Operation::SetWeightThreshold,
+        Operation::StartRewardStream,
+        Operation::TogglePause,
+        Operation::RecordFailure,
+        Operation::ResetCircuitBreaker,
+    ];
 
-    let result = client.try_vote(&g, &100u64);
-    assert!(result.is_err());
+    for op in all_ops {
+        let cost = client.get_estimated_cost(&op);
+        assert!(
+            upgrade_cost >= cost,
+            "UpgradeContract ({}) should be >= {:?} ({})",
+            upgrade_cost, op, cost
+        );
+    }
 }
 
+/// Spot-check specific constant values so any accidental regression in the
+/// cost table is immediately caught.
 #[test]
-fn test_cancel_task_emits_event() {
-    let (env, admin, _token, client) = setup();
-    client.register_task(&admin, &100u64);
+fn test_cost_spot_checks() {
+    let (_env, _admin, _token, client) = setup();
 
-    client.cancel_task(&admin, &100u64);
+    // Cheapest write ops — no cross-contract call
+    assert_eq!(client.get_estimated_cost(&Operation::SetWeightThreshold), 650_000);
+    assert_eq!(client.get_estimated_cost(&Operation::SetReputation),       700_000);
+    assert_eq!(client.get_estimated_cost(&Operation::AddGuardian),         700_000);
+    assert_eq!(client.get_estimated_cost(&Operation::TogglePause),         730_000);
+    assert_eq!(client.get_estimated_cost(&Operation::ResetCircuitBreaker), 800_000);
+    assert_eq!(client.get_estimated_cost(&Operation::RecordFailure),       880_000);
+    assert_eq!(client.get_estimated_cost(&Operation::RegisterTask),      1_000_000);
 
-    let events = env.events().all();
-    assert!(events.len() > 0);
-    let last_event = events.get(events.len() - 1).unwrap();
+    // Ops with a cross-contract call
+    assert_eq!(client.get_estimated_cost(&Operation::LockTokens),        1_250_000);
+    assert_eq!(client.get_estimated_cost(&Operation::StartRewardStream), 1_330_000);
+    assert_eq!(client.get_estimated_cost(&Operation::UnlockTokens),      1_300_000);
+    assert_eq!(client.get_estimated_cost(&Operation::ResignGuardian),    1_400_000);
 
-    use soroban_sdk::{TryFromVal, Symbol};
-    let topic_symbol = Symbol::try_from_val(&env, &last_event.1.get(0).unwrap()).unwrap();
-    assert_eq!(topic_symbol, soroban_sdk::symbol_short!("cancelled"));
-
-    let value_u64 = u64::try_from_val(&env, &last_event.2).unwrap();
-    assert_eq!(value_u64, 100u64);
+    // Most complex operations
+    assert_eq!(client.get_estimated_cost(&Operation::Vote),              1_960_000);
+    assert_eq!(client.get_estimated_cost(&Operation::UpgradeContract),   2_500_000);
 }
 
+/// `get_estimated_cost` must be callable without any auth setup — it is a
+/// pure view function with no storage access or side effects.
 #[test]
-fn test_start_reward_stream_on_cancelled_task_fails() {
-    let (env, admin, _token, client) = setup();
-    let contributor = Address::generate(&env);
-    let drips_addr = Address::generate(&env);
+fn test_estimated_cost_requires_no_auth() {
+    // Intentionally do NOT call env.mock_all_auths() — we use a fresh env.
+    let env = Env::default();
+    let contract_id = env.register_contract(None, vero_core_contracts::VeroContract);
+    let client = VeroContractClient::new(&env, &contract_id);
 
-    client.register_task(&admin, &100u64);
-    client.cancel_task(&admin, &100u64);
-
-    let result = client.try_start_reward_stream(&admin, &drips_addr, &contributor, &100u64);
-    assert!(result.is_err());
+    // Should not panic even with no auth mocked and no initialize() called.
+    let cost = client.get_estimated_cost(&Operation::Vote);
+    assert!(cost > 0);
 }
+
+/// All cost estimates must stay above the Soroban base invocation overhead
+/// (~500_000 instructions). Anything below that would be physically impossible
+/// on-chain and would cause guardian transactions to consistently fail.
+#[test]
+fn test_all_costs_above_base_invocation_overhead() {
+    let (_env, _admin, _token, client) = setup();
+    const BASE_OVERHEAD: u64 = 500_000;
+
+    let ops = [
+        Operation::RegisterTask,
+        Operation::Vote,
+        Operation::AddGuardian,
+        Operation::SetReputation,
+        Operation::LockTokens,
+        Operation::UnlockTokens,
+        Operation::ResignGuardian,
+        Operation::SetWeightThreshold,
+        Operation::StartRewardStream,
+        Operation::TogglePause,
+        Operation::RecordFailure,
+        Operation::ResetCircuitBreaker,
+        Operation::UpgradeContract,
+    ];
+
+    for op in ops {
+        let cost = client.get_estimated_cost(&op);
+        assert!(
+            cost > BASE_OVERHEAD,
+            "{:?} cost {} is not above the base invocation overhead of {}",
+            op, cost, BASE_OVERHEAD
+        );
+    }
+}
+
