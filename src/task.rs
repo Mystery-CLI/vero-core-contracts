@@ -1,7 +1,8 @@
 use soroban_sdk::{Address, Env, Vec};
 
 use crate::reentrancy;
-use crate::types::{ContractError, DataKey, Task};
+use crate::storage;
+use crate::types::{ContractError, Task};
 
 const MAX_REGISTER_TASK_BATCH_SIZE: u32 = 32;
 
@@ -32,19 +33,18 @@ pub fn register_tasks(env: &Env, admin: Address, task_ids: Vec<u64>) -> Result<(
         id: task_id,
         votes: 0,
         is_done: false,
+        resolved_at: 0,
         total_weight_accrued: 0,
         is_cancelled: false,
     };
-    env.storage().instance().set(&key, &task);
+    storage::set_active_task(env, &task);
 
     reentrancy::unlock(env);
     Ok(())
 }
 
 pub fn get_task(env: &Env, task_id: u64) -> Option<Task> {
-    env.storage()
-        .instance()
-        .get(&DataKey::Task(task_id))
+    storage::get_active_task(env, task_id)
 }
 
 pub fn get_all_tasks(env: &Env) -> Vec<u64> {

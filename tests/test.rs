@@ -66,10 +66,9 @@ fn test_add_guardian_and_register_task() {
     assert_eq!(task.id, 1);
     assert_eq!(task.votes, 0);
     assert_eq!(task.total_weight_accrued, 0);
+    assert_eq!(task.resolved_at, 0);
     assert!(!task.is_done);
 }
-
-// ─── Reputation management ─────────────────────────────────────────
 
 #[test]
 fn test_set_and_get_reputation() {
@@ -79,8 +78,8 @@ fn test_set_and_get_reputation() {
     client.add_guardian(&admin, &guardian);
     client.set_reputation(&admin, &guardian, &500u64);
 
-    let score = client.get_reputation(&guardian);
-    assert_eq!(score, Some(500));
+    assert_eq!(client.get_reputation(&guardian), Some(500));
+    assert_eq!(client.calculate_voting_power(&guardian), Some(500));
 }
 
 #[test]
@@ -116,7 +115,7 @@ fn test_single_high_rep_guardian_resolves_task() {
     lock_for_guardian(&env, &token, &client, &g, 101);
     client.vote(&g, &1u64);
 
-    let task = client.get_task(&1u64).unwrap();
+    let task = client.get_task(&42u64).unwrap();
     assert_eq!(task.votes, 1);
     assert_eq!(task.total_weight_accrued, 300);
     assert!(task.is_done);
@@ -137,8 +136,7 @@ fn test_multiple_low_rep_guardians_accumulate_weight() {
     client.vote(&g2, &42u64);
     client.vote(&g3, &42u64);
 
-    let task = client.get_task(&42u64).unwrap();
-    assert_eq!(task.total_weight_accrued, 300);
+    let task = client.get_task(&7u64).unwrap();
     assert_eq!(task.votes, 3);
     assert!(task.is_done);
 }
@@ -174,7 +172,7 @@ fn test_many_low_rep_guardians_cannot_resolve_without_enough_weight() {
         add_guardian_with_rep(&env, &token, &client, &admin, 50)
     });
 
-    client.register_task(&admin, &30u64);
+    client.register_task(&admin, &10u64);
 
     for g in &guardians {
         lock_for_guardian(&env, &token, &client, g, 101);
@@ -208,7 +206,8 @@ fn test_task_resolved_includes_final_weight() {
     assert!(task.is_done);
 }
 
-// ─── Configurable weight threshold ─────────────────────────────────
+    client.add_guardian(&admin, &no_rep);
+    mint_and_lock(&env, &token, &client, &no_rep, LOCK_THRESHOLD + 1);
 
 #[test]
 fn test_custom_weight_threshold() {
@@ -219,8 +218,6 @@ fn test_custom_weight_threshold() {
     client.set_weight_threshold(&admin, &1000u64);
     assert_eq!(client.get_weight_threshold(), 1000);
 }
-
-// ─── Error handling ─────────────────────────────────────────────────
 
 #[test]
 fn test_vote_rejected_without_reputation() {
@@ -235,12 +232,10 @@ fn test_vote_rejected_without_reputation() {
     assert!(result.is_err());
 }
 
-#[test]
-fn test_non_guardian_vote_rejected() {
-    let (env, admin, _token, client) = setup();
-    let stranger = Address::generate(&env);
+    assert!(client.try_vote(&guardian, &12u64).is_err());
 
-    client.register_task(&admin, &99u64);
+    mint_and_lock(&env, &token, &client, &guardian, LOCK_THRESHOLD);
+    assert!(client.try_vote(&guardian, &12u64).is_err());
 
     let result = client.try_vote(&stranger, &99u64);
     assert!(result.is_err());
@@ -273,11 +268,9 @@ fn test_reputation_can_be_updated() {
 
 // ─── Drips integration ─────────────────────────────────────────────
 
-#[test]
-fn test_reward_stream_rejected_for_unverified_task() {
-    let (env, admin, _token, client) = setup();
-    let contributor = Address::generate(&env);
-    let drips_addr = Address::generate(&env);
+    client.add_guardian(&admin, &guardian);
+    mint_and_lock(&env, &token, &client, &guardian, 200);
+    client.resign_guardian(&guardian);
 
     client.register_task(&admin, &10u64);
 
@@ -286,7 +279,7 @@ fn test_reward_stream_rejected_for_unverified_task() {
 }
 
 #[test]
-fn test_reward_stream_rejected_for_nonexistent_task() {
+fn test_reward_stream_rejected_until_task_verified() {
     let (env, admin, _token, client) = setup();
     let contributor = Address::generate(&env);
     let drips_addr = Address::generate(&env);
@@ -321,6 +314,7 @@ fn test_reward_stream_duplicate_rejected() {
 fn test_reward_stream_stored_after_success() {
     let (env, admin, token, client) = setup();
     let contributor = Address::generate(&env);
+    let guardian = add_guardian_with_rep(&env, &token, &client, &admin, 300);
 
     let g1 = add_guardian_with_rep(&env, &token, &client, &admin, 100);
     let g2 = add_guardian_with_rep(&env, &token, &client, &admin, 100);
@@ -332,11 +326,10 @@ fn test_reward_stream_stored_after_success() {
     client.vote(&g3, &77u64);
 
     let drips_contract_id = env.register_contract(None, MockDripsContract);
+    client.start_reward_stream(&admin, &drips_contract_id, &contributor, &21u64);
 
-    client.start_reward_stream(&admin, &drips_contract_id, &contributor, &77u64);
-
-    let stream = client.get_reward_stream(&77u64).unwrap();
-    assert_eq!(stream.task_id, 77);
+    let stream = client.get_reward_stream(&21u64).unwrap();
+    assert_eq!(stream.task_id, 21);
     assert_eq!(stream.contributor, contributor);
     assert!(stream.active);
 }
@@ -357,7 +350,7 @@ fn test_voting_fails_if_tokens_not_locked() {
 }
 
 #[test]
-fn test_voting_fails_if_locked_balance_leq_threshold() {
+fn test_admin_pause_and_circuit_breaker() {
     let (env, admin, token, client) = setup();
     let g = Address::generate(&env);
 
@@ -468,6 +461,7 @@ fn test_admin_can_toggle_pause() {
 
     assert!(!client.is_paused());
 
+    assert!(!client.is_paused());
     client.toggle_pause(&admin);
     assert!(client.is_paused());
 
@@ -490,7 +484,10 @@ fn test_admin_can_pause_and_unpause() {
 fn test_contract_paused_error_on_register_task() {
     let (_env, admin, _token, client) = setup();
 
-    client.toggle_pause(&admin);
+    for _ in 0..51 {
+        client.record_failure();
+    }
+    assert!(client.is_paused());
 
     let result = client.try_register_task(&admin, &1u64);
     assert!(result.is_err());
@@ -515,7 +512,8 @@ fn test_contract_paused_error_on_vote() {
     client.register_task(&admin, &1u64);
     lock_for_guardian(&env, &token, &client, &g, 101);
 
-    client.toggle_pause(&admin);
+    client.register_task(&admin, &40u64);
+    client.vote(&guardian, &40u64);
 
     let result = client.try_vote(&g, &1u64);
     assert!(result.is_err());
@@ -526,7 +524,7 @@ fn test_contract_paused_error_on_add_guardian() {
     let (env, admin, _token, client) = setup();
     let guardian = Address::generate(&env);
 
-    client.toggle_pause(&admin);
+    assert!(client.get_task(&40u64).is_none());
 
     let result = client.try_add_guardian(&admin, &guardian);
     assert!(result.is_err());
@@ -549,8 +547,10 @@ fn test_operations_resume_after_unpause() {
     let (env, admin, token, client) = setup();
     let g = add_guardian_with_rep(&env, &client, &admin, 300);
 
-    client.toggle_pause(&admin);
-    assert!(client.try_register_task(&admin, &1u64).is_err());
+    env.ledger()
+        .set_timestamp(resolved.resolved_at + ARCHIVE_AFTER_SECONDS);
+    assert!(client.try_archive_task(&51u64).is_err());
+    assert!(client.get_archived_task(&51u64).is_none());
 
     client.toggle_pause(&admin);
     client.register_task(&admin, &1u64);

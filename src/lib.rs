@@ -6,6 +6,7 @@ mod gas;
 mod guardian;
 mod reentrancy;
 mod reputation;
+mod storage;
 mod task;
 mod types;
 mod vault;
@@ -117,9 +118,7 @@ impl VeroCore {
 
     pub fn set_vault_address(env: Env, admin: Address, vault: Address) {
         admin.require_auth();
-        env.storage()
-            .instance()
-            .set(&DataKey::VaultAddress, &vault);
+        env.storage().instance().set(&DataKey::VaultAddress, &vault);
     }
 
     // ─── Task lifecycle ────────────────────────────────────────────
@@ -242,7 +241,7 @@ impl VeroCore {
         events::emit_weighted_vote(&env, task_id, &guardian, weight);
 
         reentrancy::unlock(&env);
-        Ok(())
+        result
     }
 
     pub fn get_task(env: Env, task_id: u64) -> Option<types::Task> {

@@ -1,5 +1,6 @@
 use soroban_sdk::{Address, Env, IntoVal, Symbol, Val, Vec as SorobanVec};
 
+use crate::storage;
 use crate::types::{ContractError, DataKey, RewardStream};
 
 pub fn start_drips_stream(
@@ -38,11 +39,7 @@ pub fn start_drips_stream(
         ],
     );
 
-    env.invoke_contract::<Val>(
-        &drips_address,
-        &Symbol::new(env, "start_stream"),
-        args,
-    );
+    env.invoke_contract::<Val>(&drips_address, &Symbol::new(env, "start_stream"), args);
 
     let mut all_streams: SorobanVec<u64> = env
         .storage()

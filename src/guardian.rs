@@ -19,9 +19,7 @@ pub fn add_guardian(env: &Env, admin: Address, guardian: Address) {
     }
 
     env.storage().instance().set(&key, &true);
-    env.storage()
-        .instance()
-        .extend_ttl(LEDGER_TTL, LEDGER_TTL);
+    env.storage().instance().extend_ttl(LEDGER_TTL, LEDGER_TTL);
 }
 
 pub fn remove_guardian(env: &Env, admin: Address, guardian: Address) {

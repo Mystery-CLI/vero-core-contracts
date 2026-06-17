@@ -7,9 +7,11 @@
 src/lib.rs:
 src/circuit_breaker.rs:
 src/drips.rs:
+src/events.rs:
 src/guardian.rs:
 src/reentrancy.rs:
 src/reputation.rs:
+src/storage.rs:
 src/task.rs:
 src/types.rs:
 src/vault.rs:

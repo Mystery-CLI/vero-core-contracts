@@ -6,13 +6,14 @@ pub fn emit_task_resolved(env: &Env, task_id: u64, weight: u64) {
 }
 
 pub fn emit_weighted_vote(env: &Env, task_id: u64, guardian: &Address, weight: u64) {
-    env.events()
-        .publish((symbol_short!("wt_vote"),), (task_id, guardian.clone(), weight));
+    env.events().publish(
+        (symbol_short!("wt_vote"),),
+        (task_id, guardian.clone(), weight),
+    );
 }
 
 pub fn emit_pause_toggled(env: &Env, paused: bool) {
-    env.events()
-        .publish((symbol_short!("paused"),), paused);
+    env.events().publish((symbol_short!("paused"),), paused);
 }
 
 pub fn emit_reward_stream_started(env: &Env, task_id: u64, contributor: &Address) {
